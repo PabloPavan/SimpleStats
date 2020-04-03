@@ -6,6 +6,11 @@
 - [x] Admin command to reset players stats.
 - [x] Player command to check his stats.
 - [x] Added top x menu players.
+- [ ] Number of round wins/loss
+
+## Feature with problems
+- [ ] Getting the seconds on server
+- [ ] Last connection of the player in the server
 
 Admin Commands
 -- 
