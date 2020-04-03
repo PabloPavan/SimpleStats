@@ -2,31 +2,35 @@
 
 #define DEBUG
 
-#define PLUGIN_AUTHOR "nhnkl159 / The Doggy"
-#define PLUGIN_VERSION "1.2"
-
-#include <sourcemod>
-#include <sdktools>
-#include <colors>
-#include <simplestats>
+#define PLUGIN_AUTHOR "queijocoalho"
+#define PLUGIN_VERSION "1.3"
 
 #define PREFIX "\x05[SimpleStats]\x01"
 
 // === MySQL === //
 Database DBSQL = null;
 
-// === Player Stats === //
-enum struct PlayerStats
+//#pragma newdecls required 
+
+#include <sourcemod>
+#include <sdktools>
+#include <colors>
+#include <simplestats>
+
+enum PlayerStats
 {
-	int Kills;
-	int Deaths;
-	int Shots;
-	int Hits;
-	int Headshots;
-	int Assists;
-	int Playtime;
-}
-PlayerStats g_Stats[MAXPLAYERS + 1];
+	 Kills,
+	 Deaths,
+	 Shots,
+	 Hits,
+	 Headshots,
+	 Assists,
+	 Playtime
+} 
+
+int g_Stats[MAXPLAYERS + 1][PlayerStats];
+// new g_Stats[MAXPLAYERS + 1][PlayerStats];
+
 
 int RemoveClient[MAXPLAYERS + 1];
 
@@ -40,7 +44,7 @@ ConVar TopLimit;
 
 public Plugin myinfo = 
 {
-	name = "[CS:GO / ?] Simple Stats", 
+	name = "[CS:GO - queijocoalho] Simple Stats", 
 	author = PLUGIN_AUTHOR, 
 	description = "Realy simple stats plugin.", 
 	version = PLUGIN_VERSION, 
@@ -57,8 +61,7 @@ public void OnPluginStart()
 	
 	RegConsoleCmd("sm_top", Cmd_Top, "Command for client to open menu with top kills x players.");
 	
-	
-	// === Events === //
+		// === Events === //
 	HookEvent("round_end", Event_RoundEnd);
 	HookEvent("player_death", Event_PlayerDeath);
 	HookEvent("weapon_fire", Event_WeaponFire);
@@ -72,7 +75,6 @@ public void OnPluginStart()
 	EnabledTop = CreateConVar("sm_ss_topenabled", "1", "Enable the menu with top players?");
 	TopLimit = CreateConVar("sm_ss_toplimit", "10", "Amount of people to display on sm_top");
 	
-	
 	SQL_StartConnection();
 	
 	AutoExecConfig(true, "sm_simplestats");
@@ -84,6 +86,7 @@ public void OnPluginStart()
 			OnClientPostAdminCheck(i);
 		}
 	}
+	
 }
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
@@ -128,7 +131,7 @@ void SQL_StartConnection()
 	DBSQL.SetCharset("utf8");
 	
 	char Query[1024];
-	FormatEx(Query, 1024, "CREATE TABLE IF NOT EXISTS `players` (`steamid` VARCHAR(64) NOT NULL, `name` VARCHAR(128), `ip` VARCHAR(64), `kills` INT(11) NOT NULL DEFAULT 0, `deaths` INT(11) NOT NULL DEFAULT 0, `shots` INT(11) NOT NULL DEFAULT 0, `hits` INT(11) NOT NULL DEFAULT 0, `headshots` INT(11) NOT NULL DEFAULT 0, `assists` INT(11) NOT NULL DEFAULT 0, `secsonserver` INT(20) NOT NULL DEFAULT 0, `lastconn` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(), PRIMARY KEY (`steamid`))");
+	FormatEx(Query, 1024, "CREATE TABLE IF NOT EXISTS `players` (`steamid` VARCHAR(64) NOT NULL, `name` VARCHAR(128), `ip` VARCHAR(64), `kills` INT(11) NOT NULL DEFAULT 0, `deaths` INT(11) NOT NULL DEFAULT 0, `shots` INT(11) NOT NULL DEFAULT 0, `hits` INT(11) NOT NULL DEFAULT 0, `headshots` INT(11) NOT NULL DEFAULT 0, `assists` INT(11) NOT NULL DEFAULT 0, `secsonserver` INT(20) NOT NULL DEFAULT 0, `lastconn` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (`steamid`))");
 	if (!SQL_FastQuery(DBSQL, Query))
 	{
 		SQL_GetError(DBSQL, Error, 255);
@@ -136,16 +139,277 @@ void SQL_StartConnection()
 	}
 }
 
-public void OnClientConnected(int client)
+stock bool IsValidClient(int client)
 {
-	// Player Stuff
-	g_Stats[client].Kills = 0;
-	g_Stats[client].Deaths = 0;
-	g_Stats[client].Shots = 0;
-	g_Stats[client].Hits = 0;
-	g_Stats[client].Headshots = 0;
-	g_Stats[client].Assists = 0;
-	g_Stats[client].Playtime = 0;
+	if (client > 0 && client <= MaxClients && IsClientInGame(client) && !IsFakeClient(client))
+	{
+		return true;
+	}
+	return false;
+}
+
+stock int GetPlayersCount()
+{
+	int count = 0;
+	for (int i = 0; i < MaxClients; i++)
+	{
+		if (IsValidClient(i))
+		{
+			count++;
+		}
+	}
+	return count;
+}
+
+stock bool InWarmUP()
+{
+	return GameRules_GetProp("m_bWarmupPeriod") != 0;
+}
+
+public void Event_RoundEnd(Event e, const char[] name, bool dontBroadcast)
+{
+	if (!PluginEnabled.BoolValue)
+	{
+		return;
+	}
+	
+	if (DBSQL == null)
+	{
+		return;
+	}
+	
+	for (int i = 0; i <= MaxClients; i++)
+	{
+		if (IsValidClient(i))
+		{
+			FuckingUpdateThatSHITHeadPlayer(i, GetClientTime(i));
+		}
+	}
+}
+
+void FuckingUpdateThatSHITHeadPlayer(int client, float timeonserver)
+{
+	if (!PluginEnabled.BoolValue)
+	{
+		return;
+	}
+	if (DBSQL == null)
+	{
+		return;
+	}
+	
+	char SteamID64[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, SteamID64, 32))
+	{
+		return;
+	}
+	
+	
+	int Seconds = RoundToNearest(timeonserver);
+	
+	char Query[512];
+	FormatEx(Query, 512, "UPDATE `players` SET `kills`= %d,`deaths`= %d,`shots`= %d,`hits`= %d,`headshots`= %d,`assists`= %d, `secsonserver` = secsonserver + %d WHERE `steamid` = '%s';", g_Stats[client][Kills], g_Stats[client][Deaths], g_Stats[client][Shots], g_Stats[client][Hits], g_Stats[client][Headshots], g_Stats[client][Assists], Seconds, SteamID64);
+	DBSQL.Query(SQL_UpdatePlayer_Callback, Query, GetClientSerial(client), DBPrio_Normal);
+}
+
+public void SQL_UpdatePlayer_Callback(Database db, DBResultSet results, const char[] error, any data)
+{
+	int client = GetClientFromSerial(data);
+	if (results == null)
+	{
+		if (client == 0)
+		{
+			LogError("[SS] Client is not valid. Reason: %s", error);
+		}
+		else
+		{
+			LogError("[SS] SQL_UpdatePlayer_Callback(): Cant use client %N data. Reason: %s", client, error);
+		}
+		return;
+	}
+}
+
+public void Event_PlayerDeath(Event e, const char[] name, bool dontBroadcast)
+{
+	if (!PluginEnabled.BoolValue)
+	{
+		return;
+	}
+	
+	if (DBSQL == null)
+	{
+		return;
+	}
+	
+	if (GetPlayersCount() < MinimumPlayers.IntValue)
+	{
+		return;
+	}
+	
+	if (InWarmUP() && !WarmUP.BoolValue)
+	{
+		return;
+	}
+	
+	//Check shit
+	int client = GetClientOfUserId(GetEventInt(e, "userid"));
+	int attacker = GetClientOfUserId(GetEventInt(e, "attacker"));
+	bool headshot = GetEventBool(e, "headshot");
+	int assister = GetClientOfUserId(GetEventInt(e, "assister"));
+	
+	if (!IsValidClient(client) || !IsValidClient(attacker))
+	{
+		return;
+	}
+	
+	if (attacker == client)
+	{
+		return;
+	}
+	
+	//Player Stats//
+	g_Stats[attacker][Kills]++;
+	g_Stats[client][Deaths]++;
+	if (headshot)
+		g_Stats[attacker][Headshots]++;
+	
+	if (assister)
+		g_Stats[assister][Assists]++;
+}
+
+public void Event_WeaponFire(Event e, const char[] name, bool dontBroadcast)
+{
+	if (!PluginEnabled.BoolValue)
+	{
+		return;
+	}
+	if (DBSQL == null)
+	{
+		return;
+	}
+	
+	if (GetPlayersCount() < MinimumPlayers.IntValue)
+	{
+		return;
+	}
+	
+	if (InWarmUP() && !WarmUP.BoolValue)
+	{
+		return;
+	}
+	
+	char FiredWeapon[32];
+	GetEventString(e, "weapon", FiredWeapon, sizeof(FiredWeapon));
+	
+	if (StrEqual(FiredWeapon, "hegrenade") || StrEqual(FiredWeapon, "flashbang") || StrEqual(FiredWeapon, "smokegrenade") || StrEqual(FiredWeapon, "molotov") || StrEqual(FiredWeapon, "incgrenade") || StrEqual(FiredWeapon, "decoy"))
+	{
+		return;
+	}
+	
+	if (!CountKnife.BoolValue && StrEqual(FiredWeapon, "weapon_knife"))
+	{
+		return;
+	}
+	
+	//Check shit
+	int client = GetClientOfUserId(GetEventInt(e, "userid"));
+	if (!IsValidClient(client))
+	{
+		return;
+	}
+	
+	//Player Stats//
+	g_Stats[client][Shots]++;
+}
+
+public void Event_PlayerHurt(Event e, const char[] name, bool dontBroadcast)
+{
+	if (!PluginEnabled.BoolValue)
+	{
+		return;
+	}
+	
+	if (DBSQL == null)
+	{
+		return;
+	}
+	
+	if (GetPlayersCount() < MinimumPlayers.IntValue)
+	{
+		return;
+	}
+	
+	if (InWarmUP() && !WarmUP.BoolValue)
+	{
+		return;
+	}
+	
+	//Check shit
+	int client = GetClientOfUserId(GetEventInt(e, "userid"));
+	int attacker = GetClientOfUserId(GetEventInt(e, "attacker"));
+	
+	if (!IsValidClient(client) || !IsValidClient(attacker))
+	{
+		return;
+	}
+	
+	int ClientTeam = GetClientTeam(client);
+	int AttackerTeam = GetClientTeam(attacker);
+	
+	if (ClientTeam != AttackerTeam)
+	{
+		//Player Stats//
+		g_Stats[attacker][Hits]++;
+	}
+}
+
+public int AreYouSureHandler(Menu menu, MenuAction action, int client, int item)
+{
+	if (action == MenuAction_Select)
+	{
+		char info[32];
+		menu.GetItem(item, info, 32);
+		
+		if (StrEqual(info, "yes"))
+		{
+			int target = GetClientFromSerial(RemoveClient[client]);
+			
+			char SteamID64[32];
+			if (!GetClientAuthId(target, AuthId_SteamID64, SteamID64, 32))
+			{
+				return 0;
+			}
+			char Query[512];
+			FormatEx(Query, 512, "DELETE FROM `players` WHERE `steamid` = '%s'", SteamID64);
+			DBSQL.Query(SQL_RemovePlayer_Callback, Query, GetClientSerial(client), DBPrio_Normal);
+		}
+	}
+	if (action == MenuAction_End)
+	{
+		delete menu;
+	}
+	return 0;
+}
+
+public void SQL_RemovePlayer_Callback(Database db, DBResultSet results, const char[] error, any data)
+{
+	int client = GetClientFromSerial(data);
+	if (results == null)
+	{
+		if (client == 0)
+		{
+			LogError("[SS] Client is not valid. Reason: %s", error);
+		}
+		else
+		{
+			LogError("[SS] SQL_RemovePlayer_Callback(): Cant use client %N data. Reason: %s", GetClientFromSerial(RemoveClient[client]), error);
+		}
+		return;
+	}
+	
+	CPrintToChat(client, "%s You have been reset \x07%N's\x01 stats.", PREFIX, GetClientFromSerial(RemoveClient[client]));
+	OnClientPostAdminCheck(GetClientFromSerial(RemoveClient[client]));
+	RemoveClient[client] = 0;
 }
 
 public void OnClientPostAdminCheck(int client)
@@ -184,51 +448,101 @@ public void OnClientPostAdminCheck(int client)
 	GetClientIP(client, ClientIP, 64);
 	
 	char Query[512];
-	FormatEx(Query, 512, "INSERT INTO `players` (`steamid`, `name`, `ip`, `lastconn`) VALUES ('%s', '%s', '%s', CURRENT_TIMESTAMP()) ON DUPLICATE KEY UPDATE `name` = '%s', `ip` = '%s', `lastconn` = CURRENT_TIMESTAMP();", SteamID64, EscapedName, ClientIP, EscapedName, ClientIP);
+	FormatEx(Query, 512, "INSERT INTO `players` (`steamid`, `name`, `ip`) VALUES ('%s', '%s', '%s') ON DUPLICATE KEY UPDATE `name` = '%s', `ip` = '%s';", SteamID64, EscapedName, ClientIP, EscapedName, ClientIP);
 	DBSQL.Query(SQL_InsertPlayer_Callback, Query, GetClientSerial(client), DBPrio_Normal);
 }
 
-public void OnClientDisconnect(int client)
+public void SQL_InsertPlayer_Callback(Database db, DBResultSet results, const char[] error, any data)
 {
-	if (!IsValidClient(client))
+	int client = GetClientFromSerial(data);
+	if (results == null)
 	{
+		if (client == 0)
+		{
+			LogError("[SS] Client is not valid. Reason: %s", error);
+		}
+		else
+		{
+			LogError("[SS] SQL_InsertPlayer_Callback(): Cant use client %N data. Reason: %s", client, error);
+		}
 		return;
-	}
-	
-	if (!PluginEnabled.BoolValue)
-	{
-		return;
-	}
-	
-	if (DBSQL == null)
-	{
-		return;
-	}
-	
-	FuckingUpdateThatSHITHeadPlayer(client, GetClientTime(client));
-}
-
-public Action Cmd_Stats(int client, int args)
-{
-	if (!IsValidClient(client))
-	{
-		return Plugin_Handled;
-	}
-	
-	if (!PluginEnabled.BoolValue)
-	{
-		return Plugin_Handled;
 	}
 	
 	char SteamID64[32];
 	if (!GetClientAuthId(client, AuthId_SteamID64, SteamID64, 32))
 	{
-		return Plugin_Handled;
+		return;
 	}
 	
-	OpenStatsMenu(client, client);
 	
-	return Plugin_Handled;
+	char Query[512];
+	char Query2[512];
+	
+	FormatEx(Query, 512, "SELECT kills, deaths, shots, hits, headshots, assists, secsonserver FROM `players` WHERE `steamid` = '%s'", SteamID64);
+	DBSQL.Query(SQL_SelectPlayer_Callback, Query, GetClientSerial(client), DBPrio_Normal);
+	
+	FormatEx(Query2, 512, "UPDATE `players` SET `lastconn`= CURRENT_TIMESTAMP() WHERE `steamid` = '%s';", SteamID64);
+	DBSQL.Query(SQL_UpdatePlayer2_Callback, Query2, GetClientSerial(client), DBPrio_Normal);
+}
+
+public void SQL_SelectPlayer_Callback(Database db, DBResultSet results, const char[] error, any data)
+{
+	if (results == null)
+	{
+		LogError("[SS] Selecting player error. Reason: %s", error);
+		return;
+	}
+	
+	int client = GetClientFromSerial(data);
+	if (client == 0)
+	{
+		LogError("[SS] Client is not valid. Reason: %s", error);
+		return;
+	}
+	
+	while (results.FetchRow())
+	{
+		g_Stats[client][Kills] = results.FetchInt(0);
+		g_Stats[client][Deaths] = results.FetchInt(1);
+		g_Stats[client][Shots] = results.FetchInt(2);
+		g_Stats[client][Hits] = results.FetchInt(3);
+		g_Stats[client][Headshots] = results.FetchInt(4);
+		g_Stats[client][Assists] = results.FetchInt(5);
+		g_Stats[client][Playtime] = results.FetchInt(6);
+	}
+}
+
+public void SQL_UpdatePlayer2_Callback(Database db, DBResultSet results, const char[] error, any data)
+{
+	int client = GetClientFromSerial(data);
+	if (results == null)
+	{
+		if (client == 0)
+		{
+			LogError("[SS] Client is not valid. Reason: %s", error);
+		}
+		else
+		{
+			LogError("[SS] SQL_UpdatePlayer2_Callback(): Cant use client %N data. Reason: %s", client, error);
+		}
+		return;
+	}
+}
+
+stock int SecondsToTime(int seconds, char[] buffer)
+{
+	int mins, secs;
+	if (seconds >= 60)
+	{
+		mins = RoundToFloor(float(seconds / 60));
+		seconds = seconds % 60;
+	}
+	secs = RoundToFloor(float(seconds));
+	
+	if (mins)
+		Format(buffer, 70, "%s%d mins, ", buffer, mins);
+	
+	Format(buffer, 70, "%s%d secs", buffer, secs);
 }
 
 void OpenStatsMenu(int client, int displayto)
@@ -241,44 +555,105 @@ void OpenStatsMenu(int client, int displayto)
 	FormatEx(Title, 32, "%s's stats :", PlayerName);
 	menu.SetTitle(Title);
 	
-	char Kills[128], Deaths[128], Shots[128], Hits[128], HS[128], Assists[128], PlayTime[258], PlayTime2[128];
+	char c_Kills[128], c_Deaths[128], c_Shots[128], c_Hits[128], c_HS[128], c_Assists[128], c_PlayTime[258], c_PlayTime2[128];
 	int Seconds = RoundToZero(GetClientTime(client));
-	int CurrentTime = Seconds + g_Stats[client].Playtime;
-	SecondsToTime(CurrentTime, PlayTime2);
+	int CurrentTime = Seconds + g_Stats[client][Playtime];
+	SecondsToTime(CurrentTime, c_PlayTime2);
 	
 	int Accuracy = 0;
-	if (g_Stats[client].Hits != 0 && g_Stats[client].Shots != 0)
+	if (g_Stats[client][Hits] != 0 && g_Stats[client][Shots] != 0)
 	{
-		Accuracy = (100 * g_Stats[client].Hits + g_Stats[client].Shots / 2) / g_Stats[client].Shots;
+		Accuracy = (100 * g_Stats[client][Hits] + g_Stats[client][Shots] / 2) / g_Stats[client][Shots];
 	}
 	
 	int HSP = 0;
-	if (g_Stats[client].Hits != 0 && g_Stats[client].Headshots != 0)
+	if (g_Stats[client][Hits] != 0 && g_Stats[client][Headshots] != 0)
 	{
-		HSP = (100 * g_Stats[client].Hits + g_Stats[client].Headshots / 2) / g_Stats[client].Headshots;
+		HSP = (100 * g_Stats[client][Hits] + g_Stats[client][Headshots] / 2) / g_Stats[client][Headshots];
 	}
 	
-	FormatEx(Kills, 128, "Your total kills : %d", g_Stats[client].Kills);
-	FormatEx(Deaths, 128, "Your total deaths : %d", g_Stats[client].Deaths);
-	FormatEx(Shots, 128, "Your total shots : %d", g_Stats[client].Shots);
-	FormatEx(Hits, 128, "Your total hits : %d (Accuracy : %d%%%)", g_Stats[client].Hits, Accuracy);
-	FormatEx(HS, 128, "Your total headshots : %d (HS Percent : %d%%%)", g_Stats[client].Headshots, HSP);
-	FormatEx(Assists, 128, "Your total assists : %d", g_Stats[client].Assists);
-	FormatEx(PlayTime, 128, "Play time : %s", PlayTime2);
+	FormatEx(c_Kills, 128, "Your total kills : %d", g_Stats[client][Kills]);
+	FormatEx(c_Deaths, 128, "Your total deaths : %d", g_Stats[client][Deaths]);
+	FormatEx(c_Shots, 128, "Your total shots : %d", g_Stats[client][Shots]);
+	FormatEx(c_Hits, 128, "Your total hits : %d (Accuracy : %d%%%)", g_Stats[client][Hits], Accuracy);
+	FormatEx(c_HS, 128, "Your total headshots : %d (HS Percent : %d%%%)", g_Stats[client][Headshots], HSP);
+	FormatEx(c_Assists, 128, "Your total assists : %d", g_Stats[client][Assists]);
+	FormatEx(c_PlayTime, 128, "Play time : %s", c_PlayTime2);
 	
-	menu.AddItem("", Kills, ITEMDRAW_DISABLED);
-	menu.AddItem("", Deaths, ITEMDRAW_DISABLED);
-	menu.AddItem("", Shots, ITEMDRAW_DISABLED);
-	menu.AddItem("", Hits, ITEMDRAW_DISABLED);
-	menu.AddItem("", HS, ITEMDRAW_DISABLED);
-	menu.AddItem("", Assists, ITEMDRAW_DISABLED);
-	menu.AddItem("", PlayTime, ITEMDRAW_DISABLED);
+	menu.AddItem("", c_Kills, ITEMDRAW_DISABLED);
+	menu.AddItem("", c_Deaths, ITEMDRAW_DISABLED);
+	menu.AddItem("", c_Shots, ITEMDRAW_DISABLED);
+	menu.AddItem("", c_Hits, ITEMDRAW_DISABLED);
+	menu.AddItem("", c_HS, ITEMDRAW_DISABLED);
+	menu.AddItem("", c_Assists, ITEMDRAW_DISABLED);
+	menu.AddItem("", c_PlayTime, ITEMDRAW_DISABLED);
 	
 	menu.ExitButton = true;
 	menu.Display(displayto, 30);
 }
 
 public int Stats_MenuHandler(Menu menu, MenuAction action, int client, int item)
+{
+	if (action == MenuAction_End)
+	{
+		delete menu;
+	}
+	
+	return 0;
+}
+
+public void SQL_SelectTop_Callback(Database db, DBResultSet results, const char[] error, any data)
+{
+	if (results == null)
+	{
+		LogError("[SS] Selecting players error. Reason: %s", error);
+		return;
+	}
+	
+	int client = GetClientFromSerial(data);
+	if (client == 0)
+	{
+		LogError("[SS] Client is not valid. Reason: %s", error);
+		return;
+	}
+	
+	Menu menu = new Menu(TopHandler);
+	char Title[128];
+	Format(Title, 128, "Top %d Killers", TopLimit.IntValue);
+	menu.SetTitle(Title);
+	
+	int Count = 0;
+	while (results.FetchRow())
+	{
+		Count++;
+		
+		//SteamID
+		char[] SteamID = new char[32];
+		results.FetchString(0, SteamID, 32);
+		
+		
+		//Player Name
+		char[] PlayerName = new char[MAX_NAME_LENGTH];
+		results.FetchString(1, PlayerName, MAX_NAME_LENGTH);
+		
+		//Kills
+		int i_Kills = results.FetchInt(2);
+		
+		char MenuContent[128];
+		FormatEx(MenuContent, 128, "%d - %s (%d kill%s)", Count, PlayerName, i_Kills, i_Kills > 1 ? "s":"");
+		menu.AddItem(SteamID, MenuContent);
+	}
+	
+	if (!Count)
+	{
+		menu.AddItem("-1", "No results.");
+	}
+	
+	menu.ExitButton = true;
+	menu.Display(client, 20);
+}
+
+public int TopHandler(Menu menu, MenuAction action, int client, int item)
 {
 	if (action == MenuAction_End)
 	{
@@ -333,53 +708,27 @@ public Action Cmd_ResetPlayer(int client, int args)
 	return Plugin_Handled;
 }
 
-public int AreYouSureHandler(Menu menu, MenuAction action, int client, int item)
+public Action Cmd_Stats(int client, int args)
 {
-	if (action == MenuAction_Select)
+	if (!IsValidClient(client))
 	{
-		char info[32];
-		menu.GetItem(item, info, 32);
-		
-		if (StrEqual(info, "yes"))
-		{
-			int target = GetClientFromSerial(RemoveClient[client]);
-			
-			char SteamID64[32];
-			if (!GetClientAuthId(target, AuthId_SteamID64, SteamID64, 32))
-			{
-				return 0;
-			}
-			char Query[512];
-			FormatEx(Query, 512, "DELETE FROM `players` WHERE `steamid` = '%s'", SteamID64);
-			DBSQL.Query(SQL_RemovePlayer_Callback, Query, GetClientSerial(client), DBPrio_Normal);
-		}
-	}
-	if (action == MenuAction_End)
-	{
-		delete menu;
-	}
-	return 0;
-}
-
-public void SQL_RemovePlayer_Callback(Database db, DBResultSet results, const char[] error, any data)
-{
-	int client = GetClientFromSerial(data);
-	if (results == null)
-	{
-		if (client == 0)
-		{
-			LogError("[SS] Client is not valid. Reason: %s", error);
-		}
-		else
-		{
-			LogError("[SS] SQL_RemovePlayer_Callback(): Cant use client %N data. Reason: %s", GetClientFromSerial(RemoveClient[client]), error);
-		}
-		return;
+		return Plugin_Handled;
 	}
 	
-	CPrintToChat(client, "%s You have been reset \x07%N's\x01 stats.", PREFIX, GetClientFromSerial(RemoveClient[client]));
-	OnClientPostAdminCheck(GetClientFromSerial(RemoveClient[client]));
-	RemoveClient[client] = 0;
+	if (!PluginEnabled.BoolValue)
+	{
+		return Plugin_Handled;
+	}
+	
+	char SteamID64[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, SteamID64, 32))
+	{
+		return Plugin_Handled;
+	}
+	
+	OpenStatsMenu(client, client);
+	
+	return Plugin_Handled;
 }
 
 public Action Cmd_Top(int client, int args)
@@ -398,415 +747,36 @@ public Action Cmd_Top(int client, int args)
 	return Plugin_Handled;
 }
 
-public void SQL_SelectTop_Callback(Database db, DBResultSet results, const char[] error, any data)
-{
-	if (results == null)
-	{
-		LogError("[SS] Selecting players error. Reason: %s", error);
-		return;
-	}
-	
-	int client = GetClientFromSerial(data);
-	if (client == 0)
-	{
-		LogError("[SS] Client is not valid. Reason: %s", error);
-		return;
-	}
-	
-	Menu menu = new Menu(TopHandler);
-	char Title[128];
-	Format(Title, 128, "Top %d Killers", TopLimit.IntValue);
-	menu.SetTitle(Title);
-	
-	int Count = 0;
-	while (results.FetchRow())
-	{
-		Count++;
-		
-		//SteamID
-		char[] SteamID = new char[32];
-		results.FetchString(0, SteamID, 32);
-		
-		
-		//Player Name
-		char[] PlayerName = new char[MAX_NAME_LENGTH];
-		results.FetchString(1, PlayerName, MAX_NAME_LENGTH);
-		
-		//Kills
-		int Kills = results.FetchInt(2);
-		
-		char MenuContent[128];
-		Format(MenuContent, 128, "%d - %s (%d kill%s)", Count, PlayerName, Kills, Kills > 1 ? "s":"");
-		menu.AddItem(SteamID, MenuContent);
-	}
-	
-	if (!Count)
-	{
-		menu.AddItem("-1", "No results.");
-	}
-	
-	menu.ExitButton = true;
-	menu.Display(client, 20);
-}
-
-public int TopHandler(Menu menu, MenuAction action, int client, int item)
-{
-	if (action == MenuAction_End)
-	{
-		delete menu;
-	}
-	
-	return 0;
-}
-
-public void SQL_InsertPlayer_Callback(Database db, DBResultSet results, const char[] error, any data)
-{
-	int client = GetClientFromSerial(data);
-	if (results == null)
-	{
-		if (client == 0)
-		{
-			LogError("[SS] Client is not valid. Reason: %s", error);
-		}
-		else
-		{
-			LogError("[SS] SQL_InsertPlayer_Callback(): Cant use client %N data. Reason: %s", client, error);
-		}
-		return;
-	}
-	
-	char SteamID64[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, SteamID64, 32))
-	{
-		return;
-	}
-	
-	
-	char Query[512];
-	char Query2[512];
-	
-	FormatEx(Query, 512, "SELECT kills, deaths, shots, hits, headshots, assists, secsonserver FROM `players` WHERE `steamid` = '%s'", SteamID64);
-	DBSQL.Query(SQL_SelectPlayer_Callback, Query, GetClientSerial(client), DBPrio_Normal);
-	
-	FormatEx(Query2, 512, "UPDATE `players` SET `lastconn`= CURRENT_TIMESTAMP() WHERE `steamid` = '%s';", SteamID64);
-	DBSQL.Query(SQL_UpdatePlayer2_Callback, Query2, GetClientSerial(client), DBPrio_Normal);
-}
-
-public void SQL_SelectPlayer_Callback(Database db, DBResultSet results, const char[] error, any data)
-{
-	if (results == null)
-	{
-		LogError("[SS] Selecting player error. Reason: %s", error);
-		return;
-	}
-	
-	int client = GetClientFromSerial(data);
-	if (client == 0)
-	{
-		LogError("[SS] Client is not valid. Reason: %s", error);
-		return;
-	}
-	
-	while (results.FetchRow())
-	{
-		g_Stats[client].Kills = results.FetchInt(0);
-		g_Stats[client].Deaths = results.FetchInt(1);
-		g_Stats[client].Shots = results.FetchInt(2);
-		g_Stats[client].Hits = results.FetchInt(3);
-		g_Stats[client].Headshots = results.FetchInt(4);
-		g_Stats[client].Assists = results.FetchInt(5);
-		g_Stats[client].Playtime = results.FetchInt(6);
-	}
-}
-
-public void Event_RoundEnd(Event e, const char[] name, bool dontBroadcast)
-{
-	if (!PluginEnabled.BoolValue)
-	{
-		return;
-	}
-	
-	if (DBSQL == null)
-	{
-		return;
-	}
-	
-	for (int i = 0; i <= MaxClients; i++)
-	{
-		if (IsValidClient(i))
-		{
-			FuckingUpdateThatSHITHeadPlayer(i, GetClientTime(i));
-		}
-	}
-}
-
-public void Event_PlayerDeath(Event e, const char[] name, bool dontBroadcast)
-{
-	if (!PluginEnabled.BoolValue)
-	{
-		return;
-	}
-	
-	if (DBSQL == null)
-	{
-		return;
-	}
-	
-	if (GetPlayersCount() < MinimumPlayers.IntValue)
-	{
-		return;
-	}
-	
-	if (InWarmUP() && !WarmUP.BoolValue)
-	{
-		return;
-	}
-	
-	//Check shit
-	int client = GetClientOfUserId(GetEventInt(e, "userid"));
-	int attacker = GetClientOfUserId(GetEventInt(e, "attacker"));
-	bool headshot = GetEventBool(e, "headshot");
-	int assister = GetClientOfUserId(GetEventInt(e, "assister"));
-	
-	if (!IsValidClient(client) || !IsValidClient(attacker))
-	{
-		return;
-	}
-	
-	if (attacker == client)
-	{
-		return;
-	}
-	
-	//Player Stats//
-	g_Stats[attacker].Kills++;
-	g_Stats[client].Deaths++;
-	if (headshot)
-		g_Stats[attacker].Headshots++;
-	
-	if (assister)
-		g_Stats[assister].Assists++;
-}
-
-public void Event_WeaponFire(Event e, const char[] name, bool dontBroadcast)
-{
-	if (!PluginEnabled.BoolValue)
-	{
-		return;
-	}
-	if (DBSQL == null)
-	{
-		return;
-	}
-	
-	if (GetPlayersCount() < MinimumPlayers.IntValue)
-	{
-		return;
-	}
-	
-	if (InWarmUP() && !WarmUP.BoolValue)
-	{
-		return;
-	}
-	
-	char FiredWeapon[32];
-	GetEventString(e, "weapon", FiredWeapon, sizeof(FiredWeapon));
-	
-	if (StrEqual(FiredWeapon, "hegrenade") || StrEqual(FiredWeapon, "flashbang") || StrEqual(FiredWeapon, "smokegrenade") || StrEqual(FiredWeapon, "molotov") || StrEqual(FiredWeapon, "incgrenade") || StrEqual(FiredWeapon, "decoy"))
-	{
-		return;
-	}
-	
-	if (!CountKnife.BoolValue && StrEqual(FiredWeapon, "weapon_knife"))
-	{
-		return;
-	}
-	
-	//Check shit
-	int client = GetClientOfUserId(GetEventInt(e, "userid"));
-	if (!IsValidClient(client))
-	{
-		return;
-	}
-	
-	//Player Stats//
-	g_Stats[client].Shots++;
-}
-
-public void Event_PlayerHurt(Event e, const char[] name, bool dontBroadcast)
-{
-	if (!PluginEnabled.BoolValue)
-	{
-		return;
-	}
-	
-	if (DBSQL == null)
-	{
-		return;
-	}
-	
-	if (GetPlayersCount() < MinimumPlayers.IntValue)
-	{
-		return;
-	}
-	
-	if (InWarmUP() && !WarmUP.BoolValue)
-	{
-		return;
-	}
-	
-	//Check shit
-	int client = GetClientOfUserId(GetEventInt(e, "userid"));
-	int attacker = GetClientOfUserId(GetEventInt(e, "attacker"));
-	
-	if (!IsValidClient(client) || !IsValidClient(attacker))
-	{
-		return;
-	}
-	
-	int ClientTeam = GetClientTeam(client);
-	int AttackerTeam = GetClientTeam(attacker);
-	
-	if (ClientTeam != AttackerTeam)
-	{
-		//Player Stats//
-		g_Stats[attacker].Hits++;
-	}
-}
-
-void FuckingUpdateThatSHITHeadPlayer(int client, float timeonserver)
-{
-	if (!PluginEnabled.BoolValue)
-	{
-		return;
-	}
-	if (DBSQL == null)
-	{
-		return;
-	}
-	
-	char SteamID64[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, SteamID64, 32))
-	{
-		return;
-	}
-	
-	
-	int Seconds = RoundToNearest(timeonserver);
-	
-	char Query[512];
-	FormatEx(Query, 512, "UPDATE `players` SET `kills`= %d,`deaths`= %d,`shots`= %d,`hits`= %d,`headshots`= %d,`assists`= %d, `secsonserver` = secsonserver + %d WHERE `steamid` = '%s';", g_Stats[client].Kills, g_Stats[client].Deaths, g_Stats[client].Shots, g_Stats[client].Hits, g_Stats[client].Headshots, g_Stats[client].Assists, Seconds, SteamID64);
-	DBSQL.Query(SQL_UpdatePlayer_Callback, Query, GetClientSerial(client), DBPrio_Normal);
-}
-
-public void SQL_UpdatePlayer_Callback(Database db, DBResultSet results, const char[] error, any data)
-{
-	int client = GetClientFromSerial(data);
-	if (results == null)
-	{
-		if (client == 0)
-		{
-			LogError("[SS] Client is not valid. Reason: %s", error);
-		}
-		else
-		{
-			LogError("[SS] SQL_UpdatePlayer_Callback(): Cant use client %N data. Reason: %s", client, error);
-		}
-		return;
-	}
-}
-
-public void SQL_UpdatePlayer2_Callback(Database db, DBResultSet results, const char[] error, any data)
-{
-	int client = GetClientFromSerial(data);
-	if (results == null)
-	{
-		if (client == 0)
-		{
-			LogError("[SS] Client is not valid. Reason: %s", error);
-		}
-		else
-		{
-			LogError("[SS] SQL_UpdatePlayer2_Callback(): Cant use client %N data. Reason: %s", client, error);
-		}
-		return;
-	}
-}
-
-stock int SecondsToTime(int seconds, char[] buffer)
-{
-	int mins, secs;
-	if (seconds >= 60)
-	{
-		mins = RoundToFloor(float(seconds / 60));
-		seconds = seconds % 60;
-	}
-	secs = RoundToFloor(float(seconds));
-	
-	if (mins)
-		Format(buffer, 70, "%s%d mins, ", buffer, mins);
-	
-	Format(buffer, 70, "%s%d secs", buffer, secs);
-}
-
-stock int GetPlayersCount()
-{
-	int count = 0;
-	for (int i = 0; i < MaxClients; i++)
-	{
-		if (IsValidClient(i))
-		{
-			count++;
-		}
-	}
-	return count;
-}
-
-
-stock bool IsValidClient(int client)
-{
-	if (client > 0 && client <= MaxClients && IsClientInGame(client) && !IsFakeClient(client))
-	{
-		return true;
-	}
-	return false;
-}
-
 public int Native_GetKillsAmount(Handle handler, int numParams)
 {
-	return g_Stats[GetNativeCell(1)].Kills;
+	return g_Stats[GetNativeCell(1)][Kills];
 }
 
 public int Native_GetDeathsAmount(Handle handler, int numParams)
 {
-	return g_Stats[GetNativeCell(1)].Deaths;
+	return g_Stats[GetNativeCell(1)][Deaths];
 }
 
 public int Native_GetShotsAmount(Handle handler, int numParams)
 {
-	return g_Stats[GetNativeCell(1)].Shots;
+	return g_Stats[GetNativeCell(1)][Shots];
 }
 public int Native_GetHitsAmount(Handle handler, int numParams)
 {
-	return g_Stats[GetNativeCell(1)].Hits;
+	return g_Stats[GetNativeCell(1)][Hits];
 }
 
 public int Native_GetHSAmount(Handle handler, int numParams)
 {
-	return g_Stats[GetNativeCell(1)].Headshots;
+	return g_Stats[GetNativeCell(1)][Headshots];
 }
 
 public int Native_GetAssistsAmount(Handle handler, int numParams)
 {
-	return g_Stats[GetNativeCell(1)].Assists;
+	return g_Stats[GetNativeCell(1)][Assists];
 }
 
 public int Native_GetPlayTimeAmount(Handle handler, int numParams)
 {
-	return g_Stats[GetNativeCell(1)].Playtime;
-}
-
-stock bool InWarmUP()
-{
-	return GameRules_GetProp("m_bWarmupPeriod") != 0;
+	return g_Stats[GetNativeCell(1)][Playtime];
 }
